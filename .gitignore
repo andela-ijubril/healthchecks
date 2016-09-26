@@ -1,6 +1,9 @@
 __pycache__/
 *.pyc
 .coverage
+.coveragerc
 hc.sqlite
 hc/local_settings.py
 static-collected
+htmlcov/
+.idea/
