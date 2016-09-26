@@ -1,5 +1,6 @@
 from datetime import timedelta as td
 
+from django.core.exceptions import FieldError
 from django.db.models import F
 from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.utils import timezone
@@ -8,7 +9,7 @@ from django.views.decorators.csrf import csrf_exempt
 
 from hc.api import schemas
 from hc.api.decorators import check_api_key, uuid_or_400, validate_json
-from hc.api.models import Check, Ping
+from hc.api.models import Check, Ping, DEFAULT_TIMEOUT, DEFAULT_GRACE
 from hc.lib.badges import check_signature, get_badge_svg
 
 
@@ -55,13 +56,36 @@ def checks(request):
         return JsonResponse(doc)
 
     elif request.method == "POST":
-        check = Check(user=request.user)
-        check.name = str(request.json.get("name", ""))
-        check.tags = str(request.json.get("tags", ""))
+        name = str(request.json.get("name", ""))
+        tags = str(request.json.get("tags", ""))
+
+        timeout = DEFAULT_TIMEOUT
         if "timeout" in request.json:
-            check.timeout = td(seconds=request.json["timeout"])
+            timeout = td(seconds=request.json["timeout"])
+
+        grace = DEFAULT_GRACE
         if "grace" in request.json:
-            check.grace = td(seconds=request.json["grace"])
+            grace = td(seconds=request.json["grace"])
+
+        unique_fields = request.json.get("unique", [])
+        if unique_fields:
+            existing_checks = Check.objects.filter(user=request.user)
+            if "name" in unique_fields:
+                existing_checks = existing_checks.filter(name=name)
+            if "tags" in unique_fields:
+                existing_checks = existing_checks.filter(tags=tags)
+            if "timeout" in unique_fields:
+                existing_checks = existing_checks.filter(timeout=timeout)
+            if "grace" in unique_fields:
+                existing_checks = existing_checks.filter(grace=grace)
+
+            if existing_checks.count() > 0:
+                # There might be more than one matching check, return first
+                first_match = existing_checks.first()
+                return JsonResponse(first_match.to_dict(), status=200)
+
+        check = Check(user=request.user, name=name, tags=tags,
+                      timeout=timeout, grace=grace)
 
         check.save()
 
